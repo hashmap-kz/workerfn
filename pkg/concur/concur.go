@@ -63,6 +63,36 @@ func ProcessConcurrentlyWithResult[T any, R any](
 	return filteredResults, filteredErrors
 }
 
+// ProcessConcurrently is similar to ProcessConcurrentlyWithResult, but it does not collect results
+func ProcessConcurrently[T any](
+	ctx context.Context,
+	tasks []T,
+	taskFunc func(context.Context, T) error,
+) []error {
+	var wg sync.WaitGroup
+	errors := make([]error, len(tasks)) // Preallocated slice for errors
+
+	for i, task := range tasks {
+		wg.Add(1)
+		go func(index int, task T) {
+			defer wg.Done()
+			errors[index] = taskFunc(ctx, task)
+		}(i, task)
+	}
+
+	wg.Wait() // Wait for all tasks to complete
+
+	// Filter nil errors for cleaner return
+	var filteredErrors []error
+	for _, err := range errors {
+		if err != nil {
+			filteredErrors = append(filteredErrors, err)
+		}
+	}
+
+	return filteredErrors
+}
+
 // ProcessConcurrentlyWithResultAndLimit executes a list of tasks concurrently with a limited number of workers,
 // collects their results and errors, and allows filtering of the results based on a user-defined filter function.
 //
@@ -132,4 +162,46 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 	}
 
 	return filteredResults, filteredErrors
+}
+
+// ProcessConcurrentlyWithLimit is similar to ProcessConcurrentlyWithResultAndLimit, but it does not collect results
+func ProcessConcurrentlyWithLimit[T any](
+	ctx context.Context,
+	workerLimit int,
+	tasks []T,
+	taskFunc func(context.Context, T) error,
+) []error {
+	errors := make([]error, len(tasks)) // Preallocated slice for errors
+
+	taskChan := make(chan int, len(tasks)) // Channel to distribute tasks
+	var wg sync.WaitGroup
+
+	// Start a fixed number of worker goroutines
+	for i := 0; i < workerLimit; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range taskChan {
+				errors[index] = taskFunc(ctx, tasks[index])
+			}
+		}()
+	}
+
+	// Send tasks to the channel
+	for i := range tasks {
+		taskChan <- i
+	}
+	close(taskChan) // Close the channel to signal workers to stop
+
+	wg.Wait() // Wait for all workers to finish
+
+	// Filter nil errors for cleaner return
+	var filteredErrors []error
+	for _, err := range errors {
+		if err != nil {
+			filteredErrors = append(filteredErrors, err)
+		}
+	}
+
+	return filteredErrors
 }

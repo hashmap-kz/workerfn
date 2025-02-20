@@ -3,6 +3,8 @@ package concur
 import (
 	"context"
 	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -44,7 +46,7 @@ func TestProcessConcurrentlyWithResultAndLimit(t *testing.T) {
 	assert.Len(t, errs, 3)                         // 1, 3, 5 should fail
 }
 
-// TODO:
+// TODO: cancellation
 //// Test Context Cancellation
 //func TestProcessConcurrentlyWithResult_Cancellation(t *testing.T) {
 //	tasks := []int{2, 4, 6, 8, 10} // All tasks should return valid results
@@ -130,4 +132,137 @@ func BenchmarkProcessConcurrentlyWithResultAndLimit(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		ProcessConcurrentlyWithResultAndLimit(ctx, 10, tasks, mockTask, mockFilter)
 	}
+}
+
+// no results funcs
+
+func mockTaskSuccess(ctx context.Context, input int) error {
+	return nil // No error
+}
+
+func mockTaskFailure(ctx context.Context, input int) error {
+	if input%2 == 0 {
+		return errors.New("task failed")
+	}
+	return nil
+}
+
+func mockTaskCounter(ctx context.Context, _ int, counter *atomic.Int32) error {
+	counter.Add(1)
+	return nil
+}
+
+func TestProcessConcurrently_Success(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5}
+	ctx := context.Background()
+
+	errs := ProcessConcurrently(ctx, tasks, mockTaskSuccess)
+
+	assert.Empty(t, errs, "No errors should be returned")
+}
+
+func TestProcessConcurrently_SomeFail(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5, 6} // 2, 4, 6 will fail
+	ctx := context.Background()
+
+	errs := ProcessConcurrently(ctx, tasks, mockTaskFailure)
+
+	assert.Len(t, errs, 3, "Only even-numbered tasks should fail")
+}
+
+// TODO: cancellation
+//func TestProcessConcurrently_Cancel(t *testing.T) {
+//	tasks := []int{1, 2, 3, 4, 5}
+//	ctx, cancel := context.WithCancel(context.Background())
+//
+//	cancel() // Cancel immediately before tasks start
+//
+//	errs := ProcessConcurrently(ctx, tasks, mockTaskFailure)
+//
+//	assert.Empty(t, errs, "No tasks should run after context is canceled")
+//}
+
+func TestProcessConcurrently_Concurrency(t *testing.T) {
+	tasks := make([]int, 100)
+	var counter atomic.Int32
+	ctx := context.Background()
+
+	ProcessConcurrently(ctx, tasks, func(ctx context.Context, n int) error {
+		mockTaskCounter(ctx, n, &counter)
+		return nil
+	})
+
+	assert.Equal(t, int32(100), counter.Load(), "All tasks should have been executed concurrently")
+}
+
+// no results, with limits
+
+func mockTaskWithLimit(ctx context.Context, _ int, activeWorkers *atomic.Int32, maxWorkers *atomic.Int32, wg *sync.WaitGroup) error {
+	defer wg.Done()
+	currentWorkers := activeWorkers.Add(1)
+	if currentWorkers > maxWorkers.Load() {
+		maxWorkers.Store(currentWorkers)
+	}
+	time.Sleep(10 * time.Millisecond) // Simulate work
+	activeWorkers.Add(-1)
+	return nil
+}
+
+func TestProcessConcurrentlyWithLimit_Success(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5}
+	ctx := context.Background()
+
+	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskSuccess)
+
+	assert.Empty(t, errs, "No errors should be returned")
+}
+
+func TestProcessConcurrentlyWithLimit_SomeFail(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5, 6} // 2, 4, 6 should fail
+	ctx := context.Background()
+
+	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskFailure)
+
+	assert.Len(t, errs, 3, "Only even-numbered tasks should fail")
+}
+
+// TODO: cancellation
+//func TestProcessConcurrentlyWithLimit_Cancel(t *testing.T) {
+//	tasks := []int{1, 2, 3, 4, 5}
+//	ctx, cancel := context.WithCancel(context.Background())
+//
+//	cancel() // Cancel immediately before tasks start
+//
+//	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskFailure)
+//
+//	assert.Empty(t, errs, "No tasks should run after context is canceled")
+//}
+
+func TestProcessConcurrentlyWithLimit_WorkerLimit(t *testing.T) {
+	tasks := make([]int, 100)
+	ctx := context.Background()
+
+	var activeWorkers atomic.Int32
+	var maxWorkers atomic.Int32
+	var wg sync.WaitGroup
+
+	wg.Add(len(tasks))
+	ProcessConcurrentlyWithLimit(ctx, 5, tasks, func(ctx context.Context, n int) error {
+		return mockTaskWithLimit(ctx, n, &activeWorkers, &maxWorkers, &wg)
+	})
+	wg.Wait()
+
+	assert.LessOrEqual(t, maxWorkers.Load(), int32(5), "No more than 5 workers should run concurrently")
+}
+
+func TestProcessConcurrentlyWithLimit_LargeInput(t *testing.T) {
+	tasks := make([]int, 10000)
+	for i := range tasks {
+		tasks[i] = i
+	}
+
+	ctx := context.Background()
+	errs := ProcessConcurrentlyWithLimit(ctx, 10, tasks, mockTaskFailure)
+
+	assert.LessOrEqual(t, len(errs), 5000, "At most half the tasks should fail")
 }
