@@ -46,19 +46,17 @@ func TestProcessConcurrentlyWithResultAndLimit(t *testing.T) {
 	assert.Len(t, errs, 3)                         // 1, 3, 5 should fail
 }
 
-// TODO: cancellation
-//// Test Context Cancellation
-//func TestProcessConcurrentlyWithResult_Cancellation(t *testing.T) {
-//	tasks := []int{2, 4, 6, 8, 10} // All tasks should return valid results
-//
-//	ctx, cancel := context.WithCancel(context.Background())
-//	cancel() // Cancel immediately
-//
-//	results, errs := ProcessConcurrentlyWithResult(ctx, tasks, mockTask, mockFilter)
-//
-//	assert.Empty(t, results) // Should return no results
-//	assert.Empty(t, errs)    // Should return no errors since no task runs
-//}
+func TestProcessConcurrentlyWithResult_Cancellation(t *testing.T) {
+	tasks := []int{2, 4, 6, 8, 10} // All tasks should return valid results
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	results, errs := ProcessConcurrentlyWithResult(ctx, tasks, mockTask, mockFilter)
+
+	assert.Empty(t, results) // Should return no results
+	assert.Empty(t, errs)    // Should return no errors since no task runs
+}
 
 // Test Worker Limit Enforcement
 func TestProcessConcurrentlyWithResultAndLimit_WorkerLimit(t *testing.T) {
@@ -170,17 +168,16 @@ func TestProcessConcurrently_SomeFail(t *testing.T) {
 	assert.Len(t, errs, 3, "Only even-numbered tasks should fail")
 }
 
-// TODO: cancellation
-//func TestProcessConcurrently_Cancel(t *testing.T) {
-//	tasks := []int{1, 2, 3, 4, 5}
-//	ctx, cancel := context.WithCancel(context.Background())
-//
-//	cancel() // Cancel immediately before tasks start
-//
-//	errs := ProcessConcurrently(ctx, tasks, mockTaskFailure)
-//
-//	assert.Empty(t, errs, "No tasks should run after context is canceled")
-//}
+func TestProcessConcurrently_Cancel(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cancel() // Cancel immediately before tasks start
+
+	errs := ProcessConcurrently(ctx, tasks, mockTaskFailure)
+
+	assert.Empty(t, errs, "No tasks should run after context is canceled")
+}
 
 func TestProcessConcurrently_Concurrency(t *testing.T) {
 	tasks := make([]int, 100)
@@ -226,17 +223,16 @@ func TestProcessConcurrentlyWithLimit_SomeFail(t *testing.T) {
 	assert.Len(t, errs, 3, "Only even-numbered tasks should fail")
 }
 
-// TODO: cancellation
-//func TestProcessConcurrentlyWithLimit_Cancel(t *testing.T) {
-//	tasks := []int{1, 2, 3, 4, 5}
-//	ctx, cancel := context.WithCancel(context.Background())
-//
-//	cancel() // Cancel immediately before tasks start
-//
-//	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskFailure)
-//
-//	assert.Empty(t, errs, "No tasks should run after context is canceled")
-//}
+func TestProcessConcurrentlyWithLimit_Cancel(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cancel() // Cancel immediately before tasks start
+
+	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskFailure)
+
+	assert.Empty(t, errs, "No tasks should run after context is canceled")
+}
 
 func TestProcessConcurrentlyWithLimit_WorkerLimit(t *testing.T) {
 	tasks := make([]int, 100)
@@ -265,4 +261,70 @@ func TestProcessConcurrentlyWithLimit_LargeInput(t *testing.T) {
 	errs := ProcessConcurrentlyWithLimit(ctx, 10, tasks, mockTaskFailure)
 
 	assert.LessOrEqual(t, len(errs), 5000, "At most half the tasks should fail")
+}
+
+// testing cancellation
+
+func mockTask1(ctx context.Context, input int) error {
+	time.Sleep(100 * time.Millisecond) // Simulate task execution
+	if input%2 == 0 {
+		return errors.New("task failed") // Simulate failure for even numbers
+	}
+	return nil
+}
+
+func mockTaskWithResult1(ctx context.Context, input int) (int, error) {
+	time.Sleep(100 * time.Millisecond) // Simulate task execution
+	if input%2 == 0 {
+		return 0, errors.New("task failed") // Simulate failure for even numbers
+	}
+	return input * 2, nil
+}
+
+func TestProcessConcurrently_Cancel1(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cancel() // Cancel immediately before tasks start
+
+	errs := ProcessConcurrently(ctx, tasks, mockTask1)
+
+	assert.Empty(t, errs, "No tasks should run after context is canceled")
+}
+
+func TestProcessConcurrentlyWithLimit_Cancel1(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cancel() // Cancel immediately before tasks start
+
+	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTask1)
+
+	assert.Empty(t, errs, "No tasks should run after context is canceled")
+}
+
+// TODO: since slices for results/errors are preallocated, they are not empty at cancellation
+
+func TestProcessConcurrentlyWithResult_Cancel1(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cancel() // Cancel immediately before tasks start
+
+	results, errs := ProcessConcurrentlyWithResult(ctx, tasks, mockTaskWithResult1, func(r int) bool { return r != 0 })
+
+	assert.Empty(t, results, "No results should be returned when context is canceled")
+	assert.Empty(t, errs, "No errors should be returned when context is canceled")
+}
+
+func TestProcessConcurrentlyWithResultAndLimit_Cancel1(t *testing.T) {
+	tasks := []int{1, 2, 3, 4, 5}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	cancel() // Cancel immediately before tasks start
+
+	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, 3, tasks, mockTaskWithResult1, func(r int) bool { return r != 0 })
+
+	assert.Empty(t, results, "No results should be returned when context is canceled")
+	assert.Empty(t, errs, "No errors should be returned when context is canceled")
 }
