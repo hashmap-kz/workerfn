@@ -95,20 +95,60 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 
 #### Example Usage
 ```go
-ctx := context.Background()
-tasks := []int{1, 2, 3, 4, 5}
-
-taskFunc := func(ctx context.Context, n int) (int, error) {
-    return n * 2, nil
+type uploadTask struct {
+	storage   uploader.Uploader
+	localPath string
+	localDir  string
+	remoteDir string
 }
 
-filterFunc := func(result int) bool {
-    return result > 4
+func uploadListOfFilesOnRemote(storageType uploader.UploaderType, l *slog.Logger, tasks []uploadTask, cfg config.UploadConfig) error {
+	workerLimit := 8
+
+	filterFn := func(result string) bool {
+		return result != ""
+	}
+
+	uploaded, errors := concur.ProcessConcurrentlyWithResultAndLimit(
+		context.Background(),
+		workerLimit,
+		tasks,
+		uploadWorker,
+		filterFn)
+
+	if len(errors) != 0 {
+		for _, e := range errors {
+			slog.Error("upload.failed.details",
+				slog.String("type", string(storageType)),
+				slog.String("err", e.Error()),
+			)
+		}
+	}
+
+	for _, e := range uploaded {
+		l.LogAttrs(context.Background(), logger.LevelTrace, "upload.success",
+			slog.String("type", string(storageType)),
+			slog.String("remote", e),
+		)
+	}
+
+	if len(errors) != 0 {
+		return fmt.Errorf("upload.failed: %s", storageType)
+	}
+	return nil
 }
 
-results, errs := concur.ProcessConcurrentlyWithResultAndLimit(ctx, 2, tasks, taskFunc, filterFunc)
-fmt.Println("Results:", results)
-fmt.Println("Errors:", errs)
+func uploadWorker(ctx context.Context, uploadTask uploadTask) (string, error) {
+
+	relativePath := uploadTask.localPath[len(uploadTask.localDir):]
+	remotePath := filepath.ToSlash(filepath.Join(uploadTask.remoteDir, relativePath))
+
+	if err := uploadTask.storage.Upload(uploadTask.localPath, remotePath); err != nil {
+		return "", err
+	}
+
+	return remotePath, nil
+}
 ```
 
 ---
