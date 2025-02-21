@@ -46,19 +46,18 @@ func TestProcessConcurrentlyWithResultAndLimit(t *testing.T) {
 	assert.Len(t, errs, 3)                         // 1, 3, 5 should fail
 }
 
-// TODO: cancellation
-//// Test Context Cancellation
-//func TestProcessConcurrentlyWithResult_Cancellation(t *testing.T) {
-//	tasks := []int{2, 4, 6, 8, 10} // All tasks should return valid results
-//
-//	ctx, cancel := context.WithCancel(context.Background())
-//	cancel() // Cancel immediately
-//
-//	results, errs := ProcessConcurrentlyWithResult(ctx, tasks, mockTask, mockFilter)
-//
-//	assert.Empty(t, results) // Should return no results
-//	assert.Empty(t, errs)    // Should return no errors since no task runs
-//}
+// Test Context Cancellation
+func TestProcessConcurrentlyWithResult_Cancellation(t *testing.T) {
+	tasks := []int{2, 4, 6, 8, 10} // All tasks should return valid results
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	results, errs := ProcessConcurrentlyWithResult(ctx, tasks, mockTask, mockFilter)
+
+	assert.Empty(t, results) // Should return no results
+	assert.Empty(t, errs)    // Should return no errors since no task runs
+}
 
 // Test Worker Limit Enforcement
 func TestProcessConcurrentlyWithResultAndLimit_WorkerLimit(t *testing.T) {
