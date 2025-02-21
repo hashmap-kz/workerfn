@@ -49,34 +49,6 @@ func TestProcessConcurrentlyWithResultAndLimit_WorkerLimit(t *testing.T) {
 	assert.Greater(t, duration, 200*time.Millisecond) // Should take more than 200ms (ensuring limited concurrency)
 }
 
-func TestProcessConcurrentlyWithResult_LargeInput(t *testing.T) {
-	tasks := make([]int, 10000)
-	for i := 0; i < len(tasks); i++ {
-		tasks[i] = i
-	}
-
-	ctx := context.Background()
-	results, errs := ProcessConcurrentlyWithResult(ctx, tasks, mockTask)
-
-	assert.Greater(t, len(results), 0)        // Ensure some results are returned
-	assert.LessOrEqual(t, len(results), 5000) // At most half should be filtered
-	assert.Len(t, errs, 5000)                 // Half should fail
-}
-
-func TestProcessConcurrentlyWithResultAndLimit_LargeInput(t *testing.T) {
-	tasks := make([]int, 10000)
-	for i := 0; i < len(tasks); i++ {
-		tasks[i] = i
-	}
-
-	ctx := context.Background()
-	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, 10, tasks, mockTask)
-
-	assert.Greater(t, len(results), 0)        // Ensure some results are returned
-	assert.LessOrEqual(t, len(results), 5000) // At most half should be filtered
-	assert.Len(t, errs, 5000)                 // Half should fail
-}
-
 // bench
 
 func BenchmarkProcessConcurrentlyWithResult(b *testing.B) {

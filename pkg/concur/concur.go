@@ -23,8 +23,8 @@ func ProcessConcurrentlyWithResult[T any, R any](
 	taskFunc func(context.Context, T) (R, error),
 ) ([]R, []error) {
 	var wg sync.WaitGroup
-	resultChan := make(chan R, len(tasks))  // Preallocated channel for results
-	errChan := make(chan error, len(tasks)) // Preallocated channel for errors
+	resultChan := make(chan R, len(tasks))  // Buffered channel for results
+	errChan := make(chan error, len(tasks)) // Buffered channel for errors
 
 	for _, task := range tasks {
 		wg.Add(1)
@@ -35,11 +35,19 @@ func ProcessConcurrentlyWithResult[T any, R any](
 			case <-ctx.Done(): // Check if context is canceled before running the task
 				return
 			default:
+				// Execute task and store result or error
 				result, err := taskFunc(ctx, task)
+				select {
+				case <-ctx.Done(): // Stop sending results/errors if context is canceled
+					return
+				case resultChan <- result:
+				}
 				if err != nil {
-					errChan <- err
-				} else {
-					resultChan <- result
+					select {
+					case errChan <- err:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}(task)
@@ -74,7 +82,7 @@ func ProcessConcurrently[T any](
 	taskFunc func(context.Context, T) error,
 ) []error {
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(tasks)) // Preallocated channel for errors
+	errChan := make(chan error, len(tasks)) // Buffered channel for errors
 
 	for i, task := range tasks {
 		wg.Add(1)
@@ -85,6 +93,7 @@ func ProcessConcurrently[T any](
 			case <-ctx.Done(): // Check if context is canceled before running the task
 				return
 			default:
+				// Execute task and store error (if any)
 				if err := taskFunc(ctx, task); err != nil {
 					select {
 					case errChan <- err: // Send error safely
@@ -128,8 +137,8 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 	tasks []T,
 	taskFunc func(context.Context, T) (R, error),
 ) ([]R, []error) {
-	resultChan := make(chan R, len(tasks))  // Preallocated channel for results
-	errChan := make(chan error, len(tasks)) // Preallocated channel for errors
+	resultChan := make(chan R, len(tasks))  // Buffered channel for results
+	errChan := make(chan error, len(tasks)) // Buffered channel for errors
 	taskChan := make(chan T, len(tasks))    // Channel to distribute tasks
 
 	var wg sync.WaitGroup
@@ -147,16 +156,24 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 					if !ok {
 						return // Exit if channel is closed
 					}
+
 					if ctx.Err() != nil {
 						return // Double-check if context is already canceled
 					}
 
 					// Execute task and store result or error
 					result, err := taskFunc(ctx, task)
+					select {
+					case <-ctx.Done(): // Stop sending results/errors if context is canceled
+						return
+					case resultChan <- result:
+					}
 					if err != nil {
-						errChan <- err
-					} else {
-						resultChan <- result
+						select {
+						case errChan <- err:
+						case <-ctx.Done():
+							return
+						}
 					}
 				}
 			}
@@ -173,9 +190,12 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 	}
 	close(taskChan) // Close the channel to signal workers to stop
 
-	wg.Wait() // Wait for all tasks to complete
-	close(resultChan)
-	close(errChan)
+	// Close resultChan and errChan safely after all workers finish
+	go func() {
+		wg.Wait() // Wait for all tasks to complete
+		close(resultChan)
+		close(errChan)
+	}()
 
 	// Collect results
 
@@ -199,7 +219,7 @@ func ProcessConcurrentlyWithLimit[T any](
 	tasks []T,
 	taskFunc func(context.Context, T) error,
 ) []error {
-	errChan := make(chan error, len(tasks)) // Preallocated channel for errors
+	errChan := make(chan error, len(tasks)) // Buffered channel for errors
 	taskChan := make(chan T, len(tasks))    // Channel to distribute tasks
 
 	var wg sync.WaitGroup
@@ -217,12 +237,18 @@ func ProcessConcurrentlyWithLimit[T any](
 					if !ok {
 						return // Exit if channel is closed
 					}
+
 					if ctx.Err() != nil {
 						return // Double-check if context is already canceled
 					}
-					err := taskFunc(ctx, task)
-					if err != nil {
-						errChan <- err
+
+					// Execute task and store error (if any)
+					if err := taskFunc(ctx, task); err != nil {
+						select {
+						case errChan <- err: // Send error safely
+						case <-ctx.Done(): // Stop sending if context is canceled
+							return
+						}
 					}
 				}
 			}
@@ -239,8 +265,11 @@ func ProcessConcurrentlyWithLimit[T any](
 	}
 	close(taskChan) // Close the channel to signal workers to stop
 
-	wg.Wait() // Wait for all workers to finish
-	close(errChan)
+	// Close errChan safely after all workers finish
+	go func() {
+		wg.Wait() // Wait for all workers to finish
+		close(errChan)
+	}()
 
 	var errors []error
 	for err := range errChan {
