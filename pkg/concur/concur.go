@@ -84,9 +84,9 @@ func ProcessConcurrently[T any](
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(tasks)) // Buffered channel for errors
 
-	for i, task := range tasks {
+	for _, task := range tasks {
 		wg.Add(1)
-		go func(index int, task T) {
+		go func(task T) {
 			defer wg.Done()
 
 			select {
@@ -101,7 +101,7 @@ func ProcessConcurrently[T any](
 					}
 				}
 			}
-		}(i, task)
+		}(task)
 	}
 
 	// Close errChan safely after all goroutines finish
