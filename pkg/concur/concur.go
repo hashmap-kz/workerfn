@@ -31,11 +31,6 @@ func ProcessConcurrentlyWithResult[T any, R any](
 		go func(task T) {
 			defer wg.Done()
 
-			// Stop execution if the context is canceled
-			if ctx.Err() != nil {
-				return
-			}
-
 			select {
 			case <-ctx.Done(): // Check if context is canceled before running the task
 				return
@@ -50,9 +45,12 @@ func ProcessConcurrentlyWithResult[T any, R any](
 		}(task)
 	}
 
-	wg.Wait() // Wait for all tasks to complete
-	close(resultChan)
-	close(errChan)
+	// Close result & error channels once all goroutines finish
+	go func() {
+		wg.Wait() // Wait for all tasks to complete
+		close(resultChan)
+		close(errChan)
+	}()
 
 	// Collect results
 
@@ -83,25 +81,25 @@ func ProcessConcurrently[T any](
 		go func(index int, task T) {
 			defer wg.Done()
 
-			// Stop if context is canceled
-			if ctx.Err() != nil {
-				return
-			}
-
 			select {
 			case <-ctx.Done(): // Check if context is canceled before running the task
 				return
 			default:
-				err := taskFunc(ctx, task)
-				if err != nil {
-					errChan <- err
+				if err := taskFunc(ctx, task); err != nil {
+					select {
+					case errChan <- err: // Send error safely
+					case <-ctx.Done(): // Stop sending if context is canceled
+					}
 				}
 			}
 		}(i, task)
 	}
 
-	wg.Wait() // Wait for all tasks to complete
-	close(errChan)
+	// Close errChan safely after all goroutines finish
+	go func() {
+		wg.Wait() // Wait for all tasks to complete
+		close(errChan)
+	}()
 
 	var errors []error
 	for err := range errChan {
