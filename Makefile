@@ -1,4 +1,4 @@
-.PHONY: lint fmt build test-cover test-race test-bench
+.PHONY: lint fmt build test-cover test-race test-bench test-bench-versions
 
 lint:
 	golangci-lint run ./...
@@ -16,4 +16,7 @@ test-race:
 	go test -race ./...
 
 test-bench:
-	go test -bench . github.com/hashmap-kz/workerfn/pkg/concur
+	go test -bench . github.com/hashmap-kz/workerfn/pkg/concur -benchmem
+
+test-bench-versions:
+	go test -bench . github.com/hashmap-kz/workerfn/pkg/versions -benchmem

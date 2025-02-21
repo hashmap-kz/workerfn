@@ -32,12 +32,21 @@ func ProcessConcurrentlyWithResult[T any, R any](
 		go func(index int, task T) {
 			defer wg.Done()
 
-			// Run the task and get the result or error
-			result, err := taskFunc(ctx, task)
-			if err != nil {
-				errors[index] = err
-			} else {
-				results[index] = result
+			// Stop execution if the context is canceled
+			if ctx.Err() != nil {
+				return
+			}
+
+			select {
+			case <-ctx.Done(): // Check if context is canceled before running the task
+				return
+			default:
+				result, err := taskFunc(ctx, task)
+				if err != nil {
+					errors[index] = err
+				} else {
+					results[index] = result
+				}
 			}
 		}(i, task)
 	}
@@ -76,7 +85,21 @@ func ProcessConcurrently[T any](
 		wg.Add(1)
 		go func(index int, task T) {
 			defer wg.Done()
-			errors[index] = taskFunc(ctx, task)
+
+			// Stop execution if the context is canceled
+			if ctx.Err() != nil {
+				return
+			}
+
+			select {
+			case <-ctx.Done(): // Check if context is canceled before running the task
+				return
+			default:
+				err := taskFunc(ctx, task)
+				if err != nil {
+					errors[index] = err
+				}
+			}
 		}(i, task)
 	}
 
@@ -125,13 +148,25 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for index := range taskChan {
-				// Run the task and get the result or error
-				result, err := taskFunc(ctx, tasks[index])
-				if err != nil {
-					errors[index] = err
-				} else {
-					results[index] = result
+			for {
+				select {
+				case <-ctx.Done(): // Stop processing if context is canceled
+					return
+				case index, ok := <-taskChan:
+					if !ok {
+						return // Exit if channel is closed
+					}
+					if ctx.Err() != nil {
+						return // Double-check if context is already canceled
+					}
+
+					// Execute task and store result or error
+					result, err := taskFunc(ctx, tasks[index])
+					if err != nil {
+						errors[index] = err
+					} else {
+						results[index] = result
+					}
 				}
 			}
 		}()
@@ -139,7 +174,11 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 
 	// Send tasks to the channel
 	for i := range tasks {
-		taskChan <- i
+		select {
+		case <-ctx.Done(): // Stop sending tasks if context is canceled
+			break
+		case taskChan <- i:
+		}
 	}
 	close(taskChan) // Close the channel to signal workers to stop
 
@@ -181,15 +220,34 @@ func ProcessConcurrentlyWithLimit[T any](
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for index := range taskChan {
-				errors[index] = taskFunc(ctx, tasks[index])
+			for {
+				select {
+				case <-ctx.Done(): // Stop processing if context is canceled
+					return
+				case index, ok := <-taskChan:
+					if !ok {
+						return // Exit if channel is closed
+					}
+					if ctx.Err() != nil {
+						return // Double-check if context is already canceled
+					}
+
+					err := taskFunc(ctx, tasks[index])
+					if err != nil {
+						errors[index] = err
+					}
+				}
 			}
 		}()
 	}
 
 	// Send tasks to the channel
 	for i := range tasks {
-		taskChan <- i
+		select {
+		case <-ctx.Done(): // Stop sending tasks if context is canceled
+			break
+		case taskChan <- i:
+		}
 	}
 	close(taskChan) // Close the channel to signal workers to stop
 
