@@ -21,15 +21,14 @@ func ProcessConcurrentlyWithResult[T any, R any](
 	ctx context.Context,
 	tasks []T,
 	taskFunc func(context.Context, T) (R, error),
-	filterFunc func(R) bool, // Function to determine if a result should be included
 ) ([]R, []error) {
 	var wg sync.WaitGroup
-	results := make([]R, len(tasks))    // Preallocated slice for results
-	errors := make([]error, len(tasks)) // Preallocated slice for errors
+	resultChan := make(chan R, len(tasks))  // Preallocated channel for results
+	errChan := make(chan error, len(tasks)) // Preallocated channel for errors
 
-	for i, task := range tasks {
+	for _, task := range tasks {
 		wg.Add(1)
-		go func(index int, task T) {
+		go func(task T) {
 			defer wg.Done()
 
 			// Stop execution if the context is canceled
@@ -43,33 +42,31 @@ func ProcessConcurrentlyWithResult[T any, R any](
 			default:
 				result, err := taskFunc(ctx, task)
 				if err != nil {
-					errors[index] = err
+					errChan <- err
 				} else {
-					results[index] = result
+					resultChan <- result
 				}
 			}
-		}(i, task)
+		}(task)
 	}
 
 	wg.Wait() // Wait for all tasks to complete
+	close(resultChan)
+	close(errChan)
 
-	// Apply the filter function to results
-	var filteredResults []R
-	for _, result := range results {
-		if filterFunc(result) { // Include only results that pass the filter
-			filteredResults = append(filteredResults, result)
-		}
+	// Collect results
+
+	var results []R
+	for result := range resultChan {
+		results = append(results, result)
 	}
 
-	// Filter nil errors for cleaner return
-	var filteredErrors []error
-	for _, err := range errors {
-		if err != nil {
-			filteredErrors = append(filteredErrors, err)
-		}
+	var errors []error
+	for err := range errChan {
+		errors = append(errors, err)
 	}
 
-	return filteredResults, filteredErrors
+	return results, errors
 }
 
 // ProcessConcurrently is similar to ProcessConcurrentlyWithResult, but it does not collect results
@@ -79,7 +76,7 @@ func ProcessConcurrently[T any](
 	taskFunc func(context.Context, T) error,
 ) []error {
 	var wg sync.WaitGroup
-	errors := make([]error, len(tasks)) // Preallocated slice for errors
+	errChan := make(chan error, len(tasks)) // Preallocated channel for errors
 
 	for i, task := range tasks {
 		wg.Add(1)
@@ -95,22 +92,22 @@ func ProcessConcurrently[T any](
 			case <-ctx.Done(): // Check if context is canceled before running the task
 				return
 			default:
-				errors[index] = taskFunc(ctx, task)
+				err := taskFunc(ctx, task)
+				if err != nil {
+					errChan <- err
+				}
 			}
 		}(i, task)
 	}
 
 	wg.Wait() // Wait for all tasks to complete
+	close(errChan)
 
-	// Filter nil errors for cleaner return
-	var filteredErrors []error
-	for _, err := range errors {
-		if err != nil {
-			filteredErrors = append(filteredErrors, err)
-		}
+	var errors []error
+	for err := range errChan {
+		errors = append(errors, err)
 	}
-
-	return filteredErrors
+	return errors
 }
 
 // ProcessConcurrentlyWithResultAndLimit executes a list of tasks concurrently with a limited number of workers,
@@ -132,12 +129,11 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 	workerLimit int,
 	tasks []T,
 	taskFunc func(context.Context, T) (R, error),
-	filterFunc func(R) bool, // Function to determine if a result should be included
 ) ([]R, []error) {
-	results := make([]R, len(tasks))    // Preallocated slice for results
-	errors := make([]error, len(tasks)) // Preallocated slice for errors
+	resultChan := make(chan R, len(tasks))  // Preallocated channel for results
+	errChan := make(chan error, len(tasks)) // Preallocated channel for errors
+	taskChan := make(chan T, len(tasks))    // Channel to distribute tasks
 
-	taskChan := make(chan int, len(tasks)) // Channel to distribute tasks
 	var wg sync.WaitGroup
 
 	// Start a fixed number of worker goroutines
@@ -149,7 +145,7 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 				select {
 				case <-ctx.Done(): // Stop processing if context is canceled
 					return
-				case index, ok := <-taskChan:
+				case task, ok := <-taskChan:
 					if !ok {
 						return // Exit if channel is closed
 					}
@@ -158,11 +154,11 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 					}
 
 					// Execute task and store result or error
-					result, err := taskFunc(ctx, tasks[index])
+					result, err := taskFunc(ctx, task)
 					if err != nil {
-						errors[index] = err
+						errChan <- err
 					} else {
-						results[index] = result
+						resultChan <- result
 					}
 				}
 			}
@@ -170,34 +166,32 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 	}
 
 	// Send tasks to the channel
-	for i := range tasks {
+	for _, task := range tasks {
 		select {
 		case <-ctx.Done(): // Stop sending tasks if context is canceled
 			break
-		case taskChan <- i:
+		case taskChan <- task:
 		}
 	}
 	close(taskChan) // Close the channel to signal workers to stop
 
-	wg.Wait() // Wait for all workers to finish
+	wg.Wait() // Wait for all tasks to complete
+	close(resultChan)
+	close(errChan)
 
-	// Apply the filter function to results
-	var filteredResults []R
-	for _, result := range results {
-		if filterFunc(result) { // Include only results that pass the filter
-			filteredResults = append(filteredResults, result)
-		}
+	// Collect results
+
+	var results []R
+	for result := range resultChan {
+		results = append(results, result)
 	}
 
-	// Filter nil errors for cleaner return
-	var filteredErrors []error
-	for _, err := range errors {
-		if err != nil {
-			filteredErrors = append(filteredErrors, err)
-		}
+	var errors []error
+	for err := range errChan {
+		errors = append(errors, err)
 	}
 
-	return filteredResults, filteredErrors
+	return results, errors
 }
 
 // ProcessConcurrentlyWithLimit is similar to ProcessConcurrentlyWithResultAndLimit, but it does not collect results
@@ -207,9 +201,9 @@ func ProcessConcurrentlyWithLimit[T any](
 	tasks []T,
 	taskFunc func(context.Context, T) error,
 ) []error {
-	errors := make([]error, len(tasks)) // Preallocated slice for errors
+	errChan := make(chan error, len(tasks)) // Preallocated channel for errors
+	taskChan := make(chan T, len(tasks))    // Channel to distribute tasks
 
-	taskChan := make(chan int, len(tasks)) // Channel to distribute tasks
 	var wg sync.WaitGroup
 
 	// Start a fixed number of worker goroutines
@@ -221,38 +215,38 @@ func ProcessConcurrentlyWithLimit[T any](
 				select {
 				case <-ctx.Done(): // Stop processing if context is canceled
 					return
-				case index, ok := <-taskChan:
+				case task, ok := <-taskChan:
 					if !ok {
 						return // Exit if channel is closed
 					}
 					if ctx.Err() != nil {
 						return // Double-check if context is already canceled
 					}
-					errors[index] = taskFunc(ctx, tasks[index])
+					err := taskFunc(ctx, task)
+					if err != nil {
+						errChan <- err
+					}
 				}
 			}
 		}()
 	}
 
 	// Send tasks to the channel
-	for i := range tasks {
+	for _, task := range tasks {
 		select {
 		case <-ctx.Done(): // Stop sending tasks if context is canceled
 			break
-		case taskChan <- i:
+		case taskChan <- task:
 		}
 	}
 	close(taskChan) // Close the channel to signal workers to stop
 
 	wg.Wait() // Wait for all workers to finish
+	close(errChan)
 
-	// Filter nil errors for cleaner return
-	var filteredErrors []error
-	for _, err := range errors {
-		if err != nil {
-			filteredErrors = append(filteredErrors, err)
-		}
+	var errors []error
+	for err := range errChan {
+		errors = append(errors, err)
 	}
-
-	return filteredErrors
+	return errors
 }
