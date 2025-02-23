@@ -12,42 +12,44 @@ import (
 )
 
 // Task function for testing
-func mockTask(ctx context.Context, input int) (int, error) {
+func mockTaskW(ctx context.Context, input int) (int, error) {
 	if input%2 == 0 {
 		return input * 2, nil // Double even numbers
 	}
 	return 0, errors.New("odd number error") // Return error for odd numbers
 }
 
-// Test ProcessConcurrentlyWithResult
-func TestProcessConcurrentlyWithResult(t *testing.T) {
-	tasks := []int{1, 2, 3, 4, 5, 6} // 2, 4, 6 will succeed
-
-	ctx := context.Background()
-	results, errs := ProcessConcurrentlyWithResult(ctx, tasks, mockTask)
-
-	assert.Len(t, results, 3)
-	assert.Len(t, errs, 3) // 1, 3, 5 should fail
+func mockTaskSuccessW(ctx context.Context, input int) error {
+	return nil // No error
 }
+
+func mockTaskFailureW(ctx context.Context, input int) error {
+	if input%2 == 0 {
+		return errors.New("task failed")
+	}
+	return nil
+}
+
+// with results
 
 // Test ProcessConcurrentlyWithResultAndLimit
 func TestProcessConcurrentlyWithResultAndLimit(t *testing.T) {
 	tasks := []int{1, 2, 3, 4, 5, 6} // 2, 4, 6 will succeed
 	ctx := context.Background()
 
-	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, 2, tasks, mockTask)
+	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, 2, tasks, mockTaskW)
 	assert.Len(t, results, 3)
 	assert.Len(t, errs, 3) // 1, 3, 5 should fail
 }
 
 // Test Context Cancellation
-func TestProcessConcurrentlyWithResult_Cancellation(t *testing.T) {
+func TestProcessConcurrentlyWithResultAndLimit_Cancellation(t *testing.T) {
 	tasks := []int{2, 4, 6, 8, 10} // All tasks should return valid results
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
-	results, errs := ProcessConcurrentlyWithResult(ctx, tasks, mockTask)
+	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, 2, tasks, mockTaskW)
 
 	assert.Empty(t, results) // Should return no results
 	assert.Empty(t, errs)    // Should return no errors since no task runs
@@ -71,20 +73,6 @@ func TestProcessConcurrentlyWithResultAndLimit_WorkerLimit(t *testing.T) {
 	assert.Greater(t, duration, 200*time.Millisecond) // Should take more than 200ms (ensuring limited concurrency)
 }
 
-func TestProcessConcurrentlyWithResult_LargeInput(t *testing.T) {
-	tasks := make([]int, 10000)
-	for i := 0; i < len(tasks); i++ {
-		tasks[i] = i
-	}
-
-	ctx := context.Background()
-	results, errs := ProcessConcurrentlyWithResult(ctx, tasks, mockTask)
-
-	assert.Greater(t, len(results), 0)        // Ensure some results are returned
-	assert.LessOrEqual(t, len(results), 5000) // At most half should be filtered
-	assert.Len(t, errs, 5000)                 // Half should fail
-}
-
 func TestProcessConcurrentlyWithResultAndLimit_LargeInput(t *testing.T) {
 	tasks := make([]int, 10000)
 	for i := 0; i < len(tasks); i++ {
@@ -92,27 +80,14 @@ func TestProcessConcurrentlyWithResultAndLimit_LargeInput(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, 10, tasks, mockTask)
+	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, 10, tasks, mockTaskW)
 
 	assert.Greater(t, len(results), 0)        // Ensure some results are returned
 	assert.LessOrEqual(t, len(results), 5000) // At most half should be filtered
 	assert.Len(t, errs, 5000)                 // Half should fail
 }
 
-// bench
-
-func BenchmarkProcessConcurrentlyWithResult(b *testing.B) {
-	tasks := make([]int, 10000)
-	for i := 0; i < len(tasks); i++ {
-		tasks[i] = i
-	}
-	ctx := context.Background()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		ProcessConcurrentlyWithResult(ctx, tasks, mockTask)
-	}
-}
+// benchmarks
 
 func BenchmarkProcessConcurrentlyWithResultAndLimit(b *testing.B) {
 	tasks := make([]int, 10000)
@@ -123,71 +98,11 @@ func BenchmarkProcessConcurrentlyWithResultAndLimit(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ProcessConcurrentlyWithResultAndLimit(ctx, 10, tasks, mockTask)
+		ProcessConcurrentlyWithResultAndLimit(ctx, 10, tasks, mockTaskW)
 	}
 }
 
-// no results funcs
-
-func mockTaskSuccess(ctx context.Context, input int) error {
-	return nil // No error
-}
-
-func mockTaskFailure(ctx context.Context, input int) error {
-	if input%2 == 0 {
-		return errors.New("task failed")
-	}
-	return nil
-}
-
-func mockTaskCounter(ctx context.Context, _ int, counter *atomic.Int32) error {
-	counter.Add(1)
-	return nil
-}
-
-func TestProcessConcurrently_Success(t *testing.T) {
-	tasks := []int{1, 2, 3, 4, 5}
-	ctx := context.Background()
-
-	errs := ProcessConcurrently(ctx, tasks, mockTaskSuccess)
-
-	assert.Empty(t, errs, "No errors should be returned")
-}
-
-func TestProcessConcurrently_SomeFail(t *testing.T) {
-	tasks := []int{1, 2, 3, 4, 5, 6} // 2, 4, 6 will fail
-	ctx := context.Background()
-
-	errs := ProcessConcurrently(ctx, tasks, mockTaskFailure)
-
-	assert.Len(t, errs, 3, "Only even-numbered tasks should fail")
-}
-
-func TestProcessConcurrently_Cancel(t *testing.T) {
-	tasks := []int{1, 2, 3, 4, 5}
-	ctx, cancel := context.WithCancel(context.Background())
-
-	cancel() // Cancel immediately before tasks start
-
-	errs := ProcessConcurrently(ctx, tasks, mockTaskFailure)
-
-	assert.Empty(t, errs, "No tasks should run after context is canceled")
-}
-
-func TestProcessConcurrently_Concurrency(t *testing.T) {
-	tasks := make([]int, 100)
-	var counter atomic.Int32
-	ctx := context.Background()
-
-	ProcessConcurrently(ctx, tasks, func(ctx context.Context, n int) error {
-		mockTaskCounter(ctx, n, &counter)
-		return nil
-	})
-
-	assert.Equal(t, int32(100), counter.Load(), "All tasks should have been executed concurrently")
-}
-
-// no results, with limits
+// without results
 
 func mockTaskWithLimit(ctx context.Context, _ int, activeWorkers *atomic.Int32, maxWorkers *atomic.Int32, wg *sync.WaitGroup) error {
 	defer wg.Done()
@@ -204,7 +119,7 @@ func TestProcessConcurrentlyWithLimit_Success(t *testing.T) {
 	tasks := []int{1, 2, 3, 4, 5}
 	ctx := context.Background()
 
-	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskSuccess)
+	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskSuccessW)
 
 	assert.Empty(t, errs, "No errors should be returned")
 }
@@ -213,7 +128,7 @@ func TestProcessConcurrentlyWithLimit_SomeFail(t *testing.T) {
 	tasks := []int{1, 2, 3, 4, 5, 6} // 2, 4, 6 should fail
 	ctx := context.Background()
 
-	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskFailure)
+	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskFailureW)
 
 	assert.Len(t, errs, 3, "Only even-numbered tasks should fail")
 }
@@ -224,7 +139,7 @@ func TestProcessConcurrentlyWithLimit_Cancel(t *testing.T) {
 
 	cancel() // Cancel immediately before tasks start
 
-	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskFailure)
+	errs := ProcessConcurrentlyWithLimit(ctx, 3, tasks, mockTaskFailureW)
 
 	assert.Empty(t, errs, "No tasks should run after context is canceled")
 }
@@ -253,7 +168,7 @@ func TestProcessConcurrentlyWithLimit_LargeInput(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	errs := ProcessConcurrentlyWithLimit(ctx, 10, tasks, mockTaskFailure)
+	errs := ProcessConcurrentlyWithLimit(ctx, 10, tasks, mockTaskFailureW)
 
 	assert.LessOrEqual(t, len(errs), 5000, "At most half the tasks should fail")
 }
