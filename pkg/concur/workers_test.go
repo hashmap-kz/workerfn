@@ -97,9 +97,36 @@ func BenchmarkProcessConcurrentlyWithResultAndLimit(b *testing.B) {
 	}
 	ctx := context.Background()
 
+	taskFunc := func(_ context.Context, input int) (int, error) {
+		if input%2 == 0 {
+			return input * 2, nil // Double even numbers
+		}
+		return 0, errors.New("odd number error") // Return error for odd numbers
+	}
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ProcessConcurrentlyWithResultAndLimit(ctx, 10, tasks, mockTaskW)
+		ProcessConcurrentlyWithResultAndLimit(ctx, 10, tasks, taskFunc)
+	}
+}
+
+func BenchmarkProcessConcurrentlyWithLimit(b *testing.B) {
+	tasks := make([]int, 10000)
+	for i := 0; i < len(tasks); i++ {
+		tasks[i] = i
+	}
+	ctx := context.Background()
+
+	taskFunc := func(_ context.Context, input int) error {
+		if input%2 == 0 {
+			return nil // Double even numbers
+		}
+		return errors.New("odd number error") // Return error for odd numbers
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ProcessConcurrentlyWithLimit(ctx, 10, tasks, taskFunc)
 	}
 }
 
