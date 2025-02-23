@@ -3,6 +3,7 @@ package concur
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -171,4 +172,125 @@ func TestProcessConcurrentlyWithLimit_LargeInput(t *testing.T) {
 	errs := ProcessConcurrentlyWithLimit(ctx, 10, tasks, mockTaskFailureW)
 
 	assert.LessOrEqual(t, len(errs), 5000, "At most half the tasks should fail")
+}
+
+// v2
+
+func TestProcessConcurrentlyWithResultAndLimit_Success(t *testing.T) {
+	t.Parallel()
+
+	tasks := []int{1, 2, 3, 4, 5}
+	workerLimit := 3
+	taskFunc := func(ctx context.Context, task int) (int, error) {
+		return task * 2, nil
+	}
+	ctx := context.Background()
+
+	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, workerLimit, tasks, taskFunc)
+	assert.Empty(t, errs, "expected no errors")
+
+	// Since each task's result is stored by its index,
+	// the order of results should match the order of tasks.
+	expected := []int{2, 4, 6, 8, 10}
+	assert.Equal(t, expected, results, "results should match expected values")
+}
+
+func TestProcessConcurrentlyWithResultAndLimit_Error(t *testing.T) {
+	t.Parallel()
+
+	tasks := []int{1, 2, 3}
+	workerLimit := 2
+	taskFunc := func(ctx context.Context, task int) (int, error) {
+		return 0, errors.New(fmt.Sprintf("error on task %d", task))
+	}
+	ctx := context.Background()
+
+	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, workerLimit, tasks, taskFunc)
+	assert.Empty(t, results, "expected no results")
+	assert.Len(t, errs, len(tasks), "expected an error per task")
+
+	// Verify error messages.
+	for i, err := range errs {
+		expectedErrMsg := fmt.Sprintf("error on task %d", tasks[i])
+		assert.EqualError(t, err, expectedErrMsg)
+	}
+}
+
+func TestProcessConcurrentlyWithResultAndLimit_Mixed(t *testing.T) {
+	t.Parallel()
+
+	tasks := []int{1, 2, 3, 4}
+	workerLimit := 2
+	taskFunc := func(ctx context.Context, task int) (int, error) {
+		// Return an error for even tasks.
+		if task%2 == 0 {
+			return 0, errors.New(fmt.Sprintf("error on task %d", task))
+		}
+		return task * 10, nil
+	}
+	ctx := context.Background()
+
+	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, workerLimit, tasks, taskFunc)
+	// Expect results for tasks 1 and 3; errors for tasks 2 and 4.
+	assert.Len(t, results, 2, "expected two results")
+	assert.Len(t, errs, 2, "expected two errors")
+
+	// Verify the results.
+	expectedResults := []int{10, 30}
+	// The order is preserved by the index.
+	assert.Equal(t, expectedResults, results, "results should match expected values")
+}
+
+func TestProcessConcurrentlyWithResultAndLimit_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	tasks := []int{1, 2, 3, 4, 5}
+	workerLimit := 2
+	var mu sync.Mutex
+	executedTasks := make([]int, 0)
+	taskFunc := func(ctx context.Context, task int) (int, error) {
+		// Simulate work.
+		time.Sleep(100 * time.Millisecond)
+		mu.Lock()
+		executedTasks = append(executedTasks, task)
+		mu.Unlock()
+		return task * 3, nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel context after 150ms.
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		cancel()
+	}()
+
+	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, workerLimit, tasks, taskFunc)
+	// We cannot guarantee how many tasks complete due to cancellation.
+	totalOutcomes := len(results) + len(errs)
+	assert.Less(t, totalOutcomes, len(tasks)+1, "not all tasks should complete after cancellation")
+	assert.NotNil(t, ctx.Err(), "expected context to be canceled")
+}
+
+func TestProcessConcurrentlyWithResultAndLimit_ConcurrencySafety(t *testing.T) {
+	t.Parallel()
+
+	numTasks := 1000
+	tasks := make([]int, numTasks)
+	for i := 0; i < numTasks; i++ {
+		tasks[i] = i
+	}
+	workerLimit := 50
+	taskFunc := func(ctx context.Context, task int) (int, error) {
+		return task * 2, nil
+	}
+	ctx := context.Background()
+
+	results, errs := ProcessConcurrentlyWithResultAndLimit(ctx, workerLimit, tasks, taskFunc)
+	assert.Empty(t, errs, "expected no errors")
+	assert.Len(t, results, numTasks, "expected all tasks to be processed")
+	// Verify each result.
+	for i, task := range tasks {
+		expected := task * 2
+		assert.Equal(t, expected, results[i], "result for task %d should be %d", task, expected)
+	}
 }
