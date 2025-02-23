@@ -24,8 +24,11 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 	taskFunc func(context.Context, T) (R, error),
 ) ([]R, []error) {
 	type outcome struct {
-		result     R
+		// since we're using preallocated slice for store both results and errors -
+		// we have to filter elements -> whether an element was set by index, or it's just an
+		// empty preallocated value, that we don't want to include in results lists.
 		hasContent bool
+		result     R
 		err        error
 	}
 	outcomes := make([]outcome, len(tasks)) // Preallocated slice for results and errors
@@ -58,7 +61,7 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 						return
 					}
 
-					outcomes[index] = outcome{result: result, hasContent: true, err: err}
+					outcomes[index] = outcome{hasContent: true, result: result, err: err}
 				}
 			}
 		}()
@@ -80,12 +83,13 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 	var filteredErrors []error
 	var filteredResults []R
 	for _, o := range outcomes {
+		if !o.hasContent {
+			continue
+		}
 		if o.err != nil {
 			filteredErrors = append(filteredErrors, o.err)
 		} else {
-			if o.hasContent {
-				filteredResults = append(filteredResults, o.result)
-			}
+			filteredResults = append(filteredResults, o.result)
 		}
 	}
 	return filteredResults, filteredErrors
