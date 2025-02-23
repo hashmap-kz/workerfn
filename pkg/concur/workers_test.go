@@ -12,18 +12,18 @@ import (
 )
 
 // Task function for testing
-func mockTaskW(ctx context.Context, input int) (int, error) {
+func mockTaskW(_ context.Context, input int) (int, error) {
 	if input%2 == 0 {
 		return input * 2, nil // Double even numbers
 	}
 	return 0, errors.New("odd number error") // Return error for odd numbers
 }
 
-func mockTaskSuccessW(ctx context.Context, input int) error {
+func mockTaskSuccessW(_ context.Context, _ int) error {
 	return nil // No error
 }
 
-func mockTaskFailureW(ctx context.Context, input int) error {
+func mockTaskFailureW(_ context.Context, input int) error {
 	if input%2 == 0 {
 		return errors.New("task failed")
 	}
@@ -104,7 +104,7 @@ func BenchmarkProcessConcurrentlyWithResultAndLimit(b *testing.B) {
 
 // without results
 
-func mockTaskWithLimit(ctx context.Context, _ int, activeWorkers *atomic.Int32, maxWorkers *atomic.Int32, wg *sync.WaitGroup) error {
+func mockTaskWithLimit(_ context.Context, _ int, activeWorkers *atomic.Int32, maxWorkers *atomic.Int32, wg *sync.WaitGroup) error {
 	defer wg.Done()
 	currentWorkers := activeWorkers.Add(1)
 	if currentWorkers > maxWorkers.Load() {

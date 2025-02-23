@@ -10,25 +10,25 @@ import (
 )
 
 // Task function for testing
-func mockTaskU(ctx context.Context, input int) (int, error) {
+func mockTaskU(_ context.Context, input int) (int, error) {
 	if input%2 == 0 {
 		return input * 2, nil // Double even numbers
 	}
 	return 0, errors.New("odd number error") // Return error for odd numbers
 }
 
-func mockTaskSuccessU(ctx context.Context, input int) error {
+func mockTaskSuccessU(_ context.Context, _ int) error {
 	return nil // No error
 }
 
-func mockTaskFailureU(ctx context.Context, input int) error {
+func mockTaskFailureU(_ context.Context, input int) error {
 	if input%2 == 0 {
 		return errors.New("task failed")
 	}
 	return nil
 }
 
-func mockTaskCounterU(ctx context.Context, _ int, counter *atomic.Int32) error {
+func mockTaskCounterU(_ context.Context, _ int, counter *atomic.Int32) error {
 	counter.Add(1)
 	return nil
 }
@@ -125,7 +125,7 @@ func TestProcessConcurrently_Concurrency(t *testing.T) {
 	ctx := context.Background()
 
 	ProcessConcurrently(ctx, tasks, func(ctx context.Context, n int) error {
-		mockTaskCounterU(ctx, n, &counter)
+		_ = mockTaskCounterU(ctx, n, &counter)
 		return nil
 	})
 
