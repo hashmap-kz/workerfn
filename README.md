@@ -3,9 +3,7 @@
 ## Overview
 `concur` is a Go package that provides functions for executing tasks concurrently. It supports:
 
-- **Unlimited concurrency** (all tasks run in parallel)
 - **Worker-limited concurrency** (control over the number of workers)
-- **Result filtering** (custom filtering of results)
 - **Error handling** (collects and returns encountered errors)
 - **Context support** (cancellation and timeout handling)
 
@@ -68,7 +66,7 @@ func uploadListOfFilesOnRemote(storageType uploader.UploaderType, l *slog.Logger
 		workerLimit,
 		tasks,
 		uploadWorker,
-  )
+	)
 
 	if len(errors) != 0 {
 		for _, e := range errors {
