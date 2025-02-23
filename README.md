@@ -9,7 +9,7 @@
 
 ## Installation
 ```sh
-go get "github.com/hashmap-kz/workerfn/"
+go get "github.com/hashmap-kz/workerfn@latest"
 ```
 
 ## Usage
