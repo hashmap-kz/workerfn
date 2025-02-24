@@ -14,6 +14,19 @@ func mockTask3(ctx context.Context, input int) (int, error) {
 	return 0, errors.New("odd number error") // Return error for odd numbers
 }
 
+func BenchmarkProcessConcurrentlyWithResultV3(b *testing.B) {
+	tasks := make([]int, tasks)
+	for i := 0; i < len(tasks); i++ {
+		tasks[i] = i
+	}
+	ctx := context.Background()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ProcessConcurrentlyWithResultV3(ctx, tasks, mockTask3)
+	}
+}
+
 func BenchmarkProcessConcurrentlyWithResultAndLimitV3(b *testing.B) {
 	tasks := make([]int, tasks)
 	for i := 0; i < len(tasks); i++ {
