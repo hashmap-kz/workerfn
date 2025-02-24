@@ -10,3 +10,4 @@ main
 vendor/
 .idea
 cover.out
+coverage.txt
