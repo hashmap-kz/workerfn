@@ -65,7 +65,7 @@ func TestProcessConcurrentlyWithResultAndLimit_WorkerLimit(t *testing.T) {
 
 	ctx := context.Background()
 	start := time.Now()
-	_, _ = ProcessConcurrentlyWithResultAndLimit(ctx, 5, tasks, func(ctx context.Context, i int) (int, error) {
+	_, _ = ProcessConcurrentlyWithResultAndLimit(ctx, 5, tasks, func(_ context.Context, i int) (int, error) {
 		time.Sleep(10 * time.Millisecond) // Simulate work
 		return i, nil
 	})
@@ -132,7 +132,7 @@ func BenchmarkProcessConcurrentlyWithLimit(b *testing.B) {
 
 // without results
 
-func mockTaskWithLimit(_ context.Context, _ int, activeWorkers *atomic.Int32, maxWorkers *atomic.Int32, wg *sync.WaitGroup) error {
+func mockTaskWithLimit(_ context.Context, _ int, activeWorkers, maxWorkers *atomic.Int32, wg *sync.WaitGroup) error {
 	defer wg.Done()
 	currentWorkers := activeWorkers.Add(1)
 	if currentWorkers > maxWorkers.Load() {
@@ -208,7 +208,7 @@ func TestProcessConcurrentlyWithResultAndLimit_Success(t *testing.T) {
 
 	tasks := []int{1, 2, 3, 4, 5}
 	workerLimit := 3
-	taskFunc := func(ctx context.Context, task int) (int, error) {
+	taskFunc := func(_ context.Context, task int) (int, error) {
 		return task * 2, nil
 	}
 	ctx := context.Background()
@@ -227,8 +227,8 @@ func TestProcessConcurrentlyWithResultAndLimit_Error(t *testing.T) {
 
 	tasks := []int{1, 2, 3}
 	workerLimit := 2
-	taskFunc := func(ctx context.Context, task int) (int, error) {
-		return 0, errors.New(fmt.Sprintf("error on task %d", task))
+	taskFunc := func(_ context.Context, task int) (int, error) {
+		return 0, fmt.Errorf("error on task %d", task)
 	}
 	ctx := context.Background()
 
@@ -248,10 +248,10 @@ func TestProcessConcurrentlyWithResultAndLimit_Mixed(t *testing.T) {
 
 	tasks := []int{1, 2, 3, 4}
 	workerLimit := 2
-	taskFunc := func(ctx context.Context, task int) (int, error) {
+	taskFunc := func(_ context.Context, task int) (int, error) {
 		// Return an error for even tasks.
 		if task%2 == 0 {
-			return 0, errors.New(fmt.Sprintf("error on task %d", task))
+			return 0, fmt.Errorf("error on task %d", task)
 		}
 		return task * 10, nil
 	}
@@ -275,7 +275,7 @@ func TestProcessConcurrentlyWithResultAndLimit_ContextCancellation(t *testing.T)
 	workerLimit := 2
 	var mu sync.Mutex
 	executedTasks := make([]int, 0)
-	taskFunc := func(ctx context.Context, task int) (int, error) {
+	taskFunc := func(_ context.Context, task int) (int, error) {
 		// Simulate work.
 		time.Sleep(100 * time.Millisecond)
 		mu.Lock()
@@ -307,7 +307,7 @@ func TestProcessConcurrentlyWithResultAndLimit_ConcurrencySafety(t *testing.T) {
 		tasks[i] = i
 	}
 	workerLimit := 50
-	taskFunc := func(ctx context.Context, task int) (int, error) {
+	taskFunc := func(_ context.Context, task int) (int, error) {
 		return task * 2, nil
 	}
 	ctx := context.Background()
