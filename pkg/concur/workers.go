@@ -15,7 +15,7 @@ import (
 //   - workerLimit: The maximum number of worker goroutines to execute tasks concurrently.
 //
 // Returns:
-// - A slice of filtered results (based on the provided filter function).
+// - A slice results.
 // - A slice of non-nil errors encountered during task execution.
 func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 	ctx context.Context,
