@@ -23,6 +23,10 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 	tasks []T,
 	taskFunc func(context.Context, T) (R, error),
 ) ([]R, []error) {
+	if workerLimit < 1 {
+		workerLimit = 1
+	}
+
 	type outcome struct {
 		// since we're using preallocated slice for store both results and errors -
 		// we have to filter elements -> whether an element was set by index, or it's just an
@@ -31,9 +35,9 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 		result     R
 		err        error
 	}
-	outcomes := make([]outcome, len(tasks)) // Preallocated slice for results and errors
 
-	taskChan := make(chan int, len(tasks)) // Channel to distribute tasks
+	outcomes := make([]outcome, len(tasks))   // Preallocated slice for results and errors
+	taskChan := make(chan int, workerLimit+2) // Channel to distribute tasks
 	var wg sync.WaitGroup
 
 	// Start a fixed number of worker goroutines
@@ -49,8 +53,10 @@ func ProcessConcurrentlyWithResultAndLimit[T any, R any](
 					if !ok {
 						return // Exit if channel is closed
 					}
+
+					// Check if context is already canceled before executing the task
 					if ctx.Err() != nil {
-						return // Double-check if context is already canceled
+						return
 					}
 
 					// Execute task and store result or error
@@ -102,9 +108,12 @@ func ProcessConcurrentlyWithLimit[T any](
 	tasks []T,
 	taskFunc func(context.Context, T) error,
 ) []error {
-	errors := make([]error, len(tasks)) // Preallocated slice for errors
+	if workerLimit < 1 {
+		workerLimit = 1
+	}
 
-	taskChan := make(chan int, len(tasks)) // Channel to distribute tasks
+	errors := make([]error, len(tasks))       // Preallocated slice for errors
+	taskChan := make(chan int, workerLimit+2) // Channel to distribute tasks
 	var wg sync.WaitGroup
 
 	// Start a fixed number of worker goroutines
@@ -120,8 +129,10 @@ func ProcessConcurrentlyWithLimit[T any](
 					if !ok {
 						return // Exit if channel is closed
 					}
+
+					// Check if context is already canceled before executing the task
 					if ctx.Err() != nil {
-						return // Double-check if context is already canceled
+						return
 					}
 
 					err := taskFunc(ctx, tasks[index])
