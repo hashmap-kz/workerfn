@@ -25,6 +25,8 @@ type TaskOutcome[T any, R any] struct {
 //   - ctx: Context for cancellation and timeout handling.
 //   - tasks: A slice of input tasks of type T to be processed.
 //   - taskFunc: A function that processes a task of type T and returns a result of type R and an error.
+//     taskFunc must synchronize any goroutines it spawns before returning.
+//     Goroutines that outlive taskFunc may cause data races on outcomes.
 //   - workerLimit: The maximum number of worker goroutines to execute tasks concurrently.
 //
 // Returns:
@@ -35,14 +37,24 @@ func ProcessConcurrentlyWithResultAndLimitV2[T any, R any](
 	workerLimit int,
 	tasks []T,
 	taskFunc func(context.Context, T) (R, error),
-) (outcomes []TaskOutcome[T, R]) {
+) []TaskOutcome[T, R] {
+	if len(tasks) == 0 {
+		return []TaskOutcome[T, R]{}
+	}
+
 	if workerLimit < 1 {
 		workerLimit = 1
 	}
 
-	outcomes = make([]TaskOutcome[T, R], len(tasks)) // Preallocated slice for results and errors
-	taskChan := make(chan int, workerLimit+2)        // Channel to distribute tasks
+	if workerLimit > len(tasks) {
+		workerLimit = len(tasks)
+	}
+
+	outcomes := make([]TaskOutcome[T, R], len(tasks)) // Preallocated slice for results and errors
+	taskChan := make(chan int, workerLimit+2)         // Channel to distribute tasks
 	var wg sync.WaitGroup
+	var closeOnce sync.Once
+	closeChan := func() { closeOnce.Do(func() { close(taskChan) }) }
 
 	// Pre-fill inputs + index so caller always sees them
 	for i, t := range tasks {
@@ -75,22 +87,24 @@ func ProcessConcurrentlyWithResultAndLimitV2[T any, R any](
 
 					// If ctx was canceled mid-task, you can still store result/err
 					// or bail out here. I'll store it, because it's safer for callers.
-					o := &outcomes[idx]
-					o.Result = res
-					o.Err = err
-					o.HasContent = true
+					outcomes[idx].Result = res
+					outcomes[idx].Err = err
+					outcomes[idx].HasContent = true
 				}
 			}
 		}()
 	}
 
 	for i := range tasks {
-		if ctx.Err() != nil {
-			break
+		select {
+		case <-ctx.Done():
+			closeChan()
+			wg.Wait()
+			return outcomes
+		case taskChan <- i:
 		}
-		taskChan <- i
 	}
-	close(taskChan)
+	closeChan()
 	wg.Wait()
 
 	sort.Slice(outcomes, func(i, j int) bool {
