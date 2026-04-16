@@ -2,7 +2,6 @@ package concur
 
 import (
 	"context"
-	"sort"
 	"sync"
 )
 
@@ -53,8 +52,6 @@ func ProcessConcurrentlyWithResultAndLimitV2[T any, R any](
 	outcomes := make([]TaskOutcome[T, R], len(tasks)) // Preallocated slice for results and errors
 	taskChan := make(chan int, workerLimit+2)         // Channel to distribute tasks
 	var wg sync.WaitGroup
-	var closeOnce sync.Once
-	closeChan := func() { closeOnce.Do(func() { close(taskChan) }) }
 
 	// Pre-fill inputs + index so caller always sees them
 	for i, t := range tasks {
@@ -95,20 +92,20 @@ func ProcessConcurrentlyWithResultAndLimitV2[T any, R any](
 		}()
 	}
 
+	flush := func() {
+		close(taskChan)
+		wg.Wait()
+	}
+
 	for i := range tasks {
 		select {
 		case <-ctx.Done():
-			closeChan()
-			wg.Wait()
+			flush()
 			return outcomes
 		case taskChan <- i:
 		}
 	}
-	closeChan()
-	wg.Wait()
 
-	sort.Slice(outcomes, func(i, j int) bool {
-		return outcomes[i].Index < outcomes[j].Index
-	})
+	flush()
 	return outcomes
 }
