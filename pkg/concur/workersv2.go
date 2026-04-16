@@ -82,8 +82,8 @@ func ProcessConcurrentlyWithResultAndLimitV2[T any, R any](
 
 					res, err := taskFunc(ctx, tasks[idx])
 
-					// If ctx was canceled mid-task, you can still store result/err
-					// or bail out here. I'll store it, because it's safer for callers.
+					// If ctx was canceled mid-task, it's safer for callers to still
+					// store the result/error.
 					outcomes[idx].Result = res
 					outcomes[idx].Err = err
 					outcomes[idx].HasContent = true
